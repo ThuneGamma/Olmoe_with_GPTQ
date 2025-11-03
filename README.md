@@ -1,118 +1,90 @@
-# GPTQ
+# 使用 GPTQ 量化 OLMoE 模型 (Quantizing OLMoE Models with GPTQ)
 
-This repository contains the code for the ICLR 2023 paper [GPTQ: Accurate Post-training Compression for Generative Pretrained Transformers](https://arxiv.org/abs/2210.17323). 
-The current release includes the following features:
+这个仓库包含了对 `allenai/OLMoE` 系列模型进行 GPTQ（Generative Pre-trained Transformer Quantization）量化的实现代码。脚本支持对模型进行不同比特数（如 2, 3, 4, 16位）的权重量化，并评估其在标准数据集（WikiText-2, PTB, C4）上的困惑度（Perplexity）。
 
-* An efficient implementation of the GPTQ algorithm: `gptq.py`
-* Compressing all models from the OPT and BLOOM families to 2/3/4 bits, including weight grouping: `opt.py`, `bloom.py`, `zeroShot/`
-* Evaluating the perplexity of quantized models on several language generation tasks: `opt.py`, `bloom.py`
-* Evaluating the performance of quantized models on several ZeroShot tasks: `zeroShot/`
-* A 3-bit quantized matrix full-precision vector product CUDA kernel: `quant_cuda_kernel.cu`, `quant_cuda.cpp`, `setup_cuda.py`
-* Benchmarking code for individual matrix-vector products and for language generation with quantized models: `test_kernel.py`, `opt.py`
+## 功能
 
-## New Features
+*   支持对 OLMoE 系列模型进行事后量化（Post-Training Quantization）。
+*   实现了 GPTQ 算法，支持分组量化（group size）、激活排序（activation order）和对称/非对称量化。
+*   支持在多个标准数据集上进行模型校准和评估。
+*   可以保存量化后的模型权重以供后续使用。
 
-Update July 2023:
+## 环境要求
 
-* Added `--static-groups` options which determines all group-grids in advance rather than dynamically during quantization, which has the effect that `--act-order` does not require any inference changes (that may cause slowdown) when used together with this option.
+在运行脚本之前，请确保你已经安装了必要的 Python 库。
 
-Together with the camera ready version of the paper we have added several updates to this repository:
-
-* Slightly adjusted preprocessing of C4 and PTB for more realistic evaluations (used in our updated results); can be activated via the flag `--new-eval`.
-* Optimized 3bit kernels, which are considerably faster especially on the A100, e.g. 1.9x -> 3.25x generation speedup for OPT-175B; can be activated via `--faster-kernel`.
-* A minimal LlaMa integration (for more complete features see the [GPTQ-for-LLaMA](https://github.com/qwopqwop200/GPTQ-for-LLaMa) repository), which demonstrates two new tricks:`--act-order` (quantizing columns in order of decreasing activation size) and `--true-sequential` (performing sequential quantization even within a single Transformer block). Those fix GPTQ's strangely bad performance on the 7B model (from 7.15 to 6.09 Wiki2 PPL) and lead to slight improvements on most models/settings in general.
-
-Here is a summary of LLaMa results:
-
-| Wiki2 PPL | FP16 | 4bit-RTN | 4bit-GPTQ | 3bit-RTN | 3bit-GPTQ | 3g128-GPTQ |
-|:---------:|:----:|:--------:|:---------:|:--------:|:---------:|:----------:|
-| LLaMa-7B  | 5.68 | 6.29     | **6.09**  | 25.54    | **8.07**  | 6.61       |
-| LLaMa-13B | 5.09 | 5.53     | **5.36**  | 11.40    | **6.63**  | 5.62       |
-| LLaMa-30B | 4.10 | 4.54     | **4.45**  | 14.89    | **5.69**  | 4.80       |
-| LLaMa-65B | 3.53 | 3.92     | **3.84**  | 10.59    | **5.04**  | 4.17       |
-
-Here is a sample command:
-
-```
-python llama.py LLAMA_HF_FOLDER c4 --wbits 4 --true-sequential --act-order --new-eval
+```bash
+pip install torch transformers datasets sentencepiece accelerate
 ```
 
-The `--act-order` heuristic also dramatically improves accuracy on the OPT-66B outlier model: 9.55 to 9.34 and 14.16 to 9.95 PPL on Wiki2 for 4bit and 3bit, respectively.
+你还需要确保项目中的辅助文件存在于同一个目录下：
+*   `gptq.py`
+*   `modelutils.py`
+*   `quant.py`
+*   `datautils.py`
 
-## Dependencies
+## 使用方法
 
-* `torch`: tested on v1.10.1+cu111
-* `transformers`: tested on v4.21.2 (the LLaMa integration currently requires a main install from source and `sentencepiece`)
-* `datasets`: tested on v1.17.0
-* (to run 3-bit kernels: setup for compiling PyTorch CUDA extensions, see also https://pytorch.org/tutorials/advanced/cpp_extension.html, tested on CUDA 11.4)
+脚本通过命令行参数来控制模型的加载、量化和评估流程。
 
-All experiments were run on a single 80GB NVIDIA A100. However, most experiments will work on a GPU with a lot less memory as well.
+### 参数说明
 
-## Language Generation
+*   `model`: 必选，要加载的 OLMoE 模型名称或路径 (例如: `allenai/OLMoE-1B` 或 `allenai/OLMoE-7B`)。
+*   `dataset`: 必选，用于模型校准的数据集 (`wikitext2`, `ptb`, `c4`)。
+*   `--wbits`: 量化的比特数 (可选: 2, 3, 4, 8, 16)。设置为 16 将跳过量化，直接评估原始模型。
+*   `--groupsize`: 分组量化的大小。默认为 -1，表示按行（per-row）量化。
+*   `--nsamples`: 用于校准的样本数量，默认为 128。
+*   `--act-order`: 是否在量化时应用激活排序，这有助于提升量化精度。
+*   `--sym`: 是否执行对称量化。
+*   `--save`: 保存量化后模型权重的文件路径 (例如: `olmoe-1b-4bit.pt`)。
+*   `--true-sequential`: 是否以真正的顺序模式执行量化，有助于节省显存。
+*   `--nearest`: 使用最邻近取整（RTN）方法进行量化，作为基线对比。
 
-### OPT
+### 示例
 
-```
-# Compute full precision (FP16) results
-CUDA_VISIBLE_DEVICES=0 python opt.py facebook/opt-125m c4
-# Run RTN baseline and compute results
-CUDA_VISIBLE_DEVICES=0 python opt.py facebook/opt-125m c4 --wbits 4 --nearest
-# Run GPTQ and compute results
-CUDA_VISIBLE_DEVICES=0 python opt.py facebook/opt-125m c4 --wbits 4 [--groupsize 1024]
-````
+#### 1. 对 `allenai/OLMoE-1B` 模型进行 4-bit 量化
 
-To run other OPT models replace `opt-125m` with one of: `opt-350m`, `opt-1.3b`, `opt-2.7b`, `opt-6.7b`, `opt-13b`, `opt-66b`.
-For the 175B-parameter mode, you have to request access from Meta and then convert it to a local HuggingFace checkpoint using their scripts in `metaseq`.
-Once you have such a checkpoint, simply pass its path instead of `facebook/opt-125m`. 
+以下命令将会：
+*   加载 `allenai/OLMoE-1B` 模型。
+*   使用 `wikitext2` 数据集的前 128 个样本进行校准。
+*   进行 4-bit、group-size 为 128 的量化，并启用激活排序。
+*   在 `wikitext2`, `ptb`, `c4` 数据集上评估量化后模型的困惑度。
+*   最后，将量化后的模型权重保存到 `olmoe-1b-4bit.pt` 文件中。
 
-### BLOOM
-
-```
-# Compute full precision (FP16) results
-CUDA_VISIBLE_DEVICES=0 python bloom.py bigscience/bloom-560m c4
-# Run RTN baseline and compute results
-CUDA_VISIBLE_DEVICES=0 python bloom.py bigscience/bloom-560m c4 --wbits 4 --nearest
-# Run GPTQ and compute results
-CUDA_VISIBLE_DEVICES=0 python bloom.py bigscience/bloom-560m c4 --wbits 4 [--groupsize 1024]
-````
-
-To run other BLOOM models replace `bloom-560m` with one of: `bloom-1b1`, `bloom-1b7`, `bloom-3b`, `bloom-7b1`, `bloom`.
-
-## ZeroShot
-
-See `zeroShot/` folder.
-
-## 3-bit CUDA Kernels 
-
-```
-# Install kernels
-python setup_cuda.py install
-
-# Benchmark performance for FC2 layer of OPT-175B
-CUDA_VISIBLE_DEVICES=0 python test_kernel.py
-
-# Benchmark language generation with 3-bit OPT-175B:
-# OPT175B denotes the name of the folder with the HuggingFace OPT-175b checkpoint (see above)
-
-# Save compressed model
-CUDA_VISIBLE_DEVICES=0 python opt.py OPT175B c4 --wbits 3 --save opt175-3bit.pt
-# Benchmark generating a 128 token sequence with the saved model
-CUDA_VISIBLE_DEVICES=0 python opt.py OPT175B c4 --load opt175b-3bit.pt --benchmark 128
-# Benchmark FP16 baseline, note that the model will be split across all listed GPUs
-CUDA_VISIBLE_DEVICES=0,1,2,3,4 python opt.py OPT175B c4 --benchmark 128
+```bash
+python olmoe.py \
+    allenai/OLMoE-1B \
+    wikitext2 \
+    --wbits 4 \
+    --groupsize 128 \
+    --act-order \
+    --save olmoe-1b-4bit.pt
 ```
 
-Please note that our 3-bit kernels are currently only optimized for OPT-175B running on 1xA100 or 2xA6000 and may thus yield suboptimal performance on smaller models or on other GPUs.
+#### 2. 评估原始（FP16）模型的性能
 
-## Cite
+如果你想跳过量化，直接评估原始 FP16 模型的性能，可以将 `wbits` 设置为 16。
 
-If you found this work useful, please consider citing:
-
+```bash
+python olmoe.py \
+    allenai/OLMoE-1B \
+    wikitext2 \
+    --wbits 16
 ```
-@article{frantar-gptq,
-  title={{GPTQ}: Accurate Post-training Compression for Generative Pretrained Transformers}, 
-  author={Elias Frantar and Saleh Ashkboos and Torsten Hoefler and Dan Alistarh},
-  year={2022},
-  journal={arXiv preprint arXiv:2210.17323}
-}
+
+#### 3. 使用 RTN 方法进行 3-bit 量化
+
+使用简单的取整（Round-To-Nearest）方法进行量化，可以添加 `--nearest` 标志。
+
+```bash
+python olmoe.py \
+    allenai/OLMoE-1B \
+    wikitext2 \
+    --wbits 3 \
+    --nearest
 ```
+
+## 注意事项
+
+*   量化过程需要较高的 GPU 显存。对于大型模型（如 7B），请确保你有足够的显存。可以尝试使用 `--true-sequential` 标志来降低显存峰值。
+*   脚本会自动从 Hugging Face Hub 下载模型和数据集。
