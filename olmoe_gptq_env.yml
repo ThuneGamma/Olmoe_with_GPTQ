@@ -235,4 +235,3 @@ dependencies:
       - tzdata==2025.2
       - xxhash==3.6.0
       - yarl==1.22.0
-prefix: /data/lyx/environments/conda_envs/olmoe-gptq
