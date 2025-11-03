@@ -1,27 +1,30 @@
 # 使用 GPTQ 量化 OLMoE 模型 (Quantizing OLMoE Models with GPTQ)
 
-这个仓库包含了对 `allenai/OLMoE` 系列模型进行 GPTQ（Generative Pre-trained Transformer Quantization）量化的实现代码。脚本支持对模型进行不同比特数（如 2, 3, 4, 16位）的权重量化，并评估其在标准数据集（WikiText-2, PTB, C4）上的困惑度（Perplexity）。
+这个仓库包含了对 `allenai/OLMoE` 系列模型进行 GPTQ 量化的实现代码。脚本支持对模型进行不同比特数（如 2, 3, 4, 16位）的权重量化，并评估其在标准数据集（WikiText-2, PTB, C4）上的困惑度（Perplexity）。
 
 ## 功能
 
-*   支持对 OLMoE 系列模型进行事后量化（Post-Training Quantization）。
-*   实现了 GPTQ 算法，支持分组量化（group size）、激活排序（activation order）和对称/非对称量化。
+*   支持对 OLMoE 系列模型进行 GPTQ 量化，支持分组量化（group size）、激活排序（activation order）和对称/非对称量化。
 *   支持在多个标准数据集上进行模型校准和评估。
 *   可以保存量化后的模型权重以供后续使用。
 
 ## 环境要求
 
-在运行脚本之前，请确保你已经安装了必要的 Python 库。
+为了确保所有依赖版本一致，推荐使用 Conda 和项目提供的 `olmoe_gptq_env.yml` 文件来创建虚拟环境。
 
-```bash
-pip install torch transformers datasets sentencepiece accelerate
-```
+### 使用 Conda (推荐)
 
-你还需要确保项目中的辅助文件存在于同一个目录下：
-*   `gptq.py`
-*   `modelutils.py`
-*   `quant.py`
-*   `datautils.py`
+1.  **创建 Conda 环境**
+    在你的终端中，使用以下命令从 `yml` 文件创建并安装所有依赖：
+    ```bash
+    conda env create -f olmoe_gptq_env.yml
+    ```
+
+2.  **激活环境**
+    创建成功后，使用以下命令激活新环境：
+    ```bash
+    conda activate olmoe-gptq
+    ```
 
 ## 使用方法
 
