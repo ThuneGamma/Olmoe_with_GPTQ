@@ -42,10 +42,10 @@ pip install torch transformers datasets sentencepiece accelerate
 
 ### 示例
 
-#### 1. 对 `allenai/OLMoE-1B` 模型进行 4-bit 量化
+#### 1. 对 `allenai/olmoe-1b-7b-0125-instruct` 模型进行 4-bit 量化
 
 以下命令将会：
-*   加载 `allenai/OLMoE-1B` 模型。
+*   加载 `allenai/olmoe-1b-7b-0125-instruct` 模型。
 *   使用 `wikitext2` 数据集的前 128 个样本进行校准。
 *   进行 4-bit、group-size 为 128 的量化，并启用激活排序。
 *   在 `wikitext2`, `ptb`, `c4` 数据集上评估量化后模型的困惑度。
